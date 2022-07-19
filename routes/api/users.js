@@ -1,9 +1,13 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const Joi = require("joi");
+require("dotenv").config();
 
 const User = require("../../models/user");
+
 const { createError } = require("../../helpers");
+const { authorize } = require("../../middlewares");
 
 const router = express.Router();
 
@@ -20,8 +24,10 @@ const userLoginSchema = Joi.object({
   password: Joi.string().min(6).required(),
 });
 
-// signup
-router.post("/register", async (req, res, next) => {
+const { SECRET_KEY } = process.env;
+
+// register
+router.post("/signup", async (req, res, next) => {
   try {
     const { error } = userRegisterSchema.validate(req.body);
 
@@ -32,7 +38,7 @@ router.post("/register", async (req, res, next) => {
     const { email, password, name } = req.body;
     const user = await User.findOne({ email });
     if (user) {
-      throw createError(409, "Email already registered");
+      throw createError(409, "Email in use");
     }
 
     const hashPassword = await bcrypt.hash(password, 10);
@@ -53,22 +59,29 @@ router.post("/login", async (req, res, next) => {
     if (error) {
       throw createError(400, error.message);
     }
-
     const { email, password } = req.body;
     const user = await User.findOne({ email });
-    if (!user) {
-      throw createError(401, "Email wrong");
-    }
 
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    if (!isValidPassword) {
-      throw createError(401, "Password wrong");
-    }
-    // if (!user || !isValidPassword) {
-    //   throw createError(401, "Email or password is wrong")
+    // if (!user) {
+    //   throw createError(401, "Email wrong");
     // }
 
-    const token = "OLOLO";
+    // const isValidPassword = await bcrypt.compare(password, user.password);
+    // if (!isValidPassword) {
+    //   throw createError(401, "Password wrong");
+    // }
+
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!user || !isValidPassword) {
+      throw createError(401, "Email or password is wrong");
+    }
+
+    const payload = {
+      id: user._id,
+    };
+    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: "1h" });
+    await User.findByIdAndUpdate(user._id, { token });
+
     res.json({
       token,
     });
@@ -76,4 +89,19 @@ router.post("/login", async (req, res, next) => {
     next(error);
   }
 });
+
+// logout
+router.get("/logout", authorize, async (req, res, next) => {
+  try {
+    const { _id } = req.user;
+    await User.findByIdAndUpdate(_id, { token: "" });
+
+    res.json({
+      message: "Logout Successful",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

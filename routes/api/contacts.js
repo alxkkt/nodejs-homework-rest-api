@@ -4,9 +4,11 @@ const Joi = require("joi");
 const router = express.Router();
 
 const Contact = require("../../models/contact");
-const { createError } = require("../../helpers");
 
-const contactScheme = Joi.object({
+const { createError } = require("../../helpers");
+const { authorize } = require("../../middlewares");
+
+const contactSchema = Joi.object({
   name: Joi.string().required(),
   phone: Joi.string().required(),
   email: Joi.string().required(),
@@ -16,15 +18,22 @@ const contactScheme = Joi.object({
 const contactUpdateFavoriteSchema = Joi.object({
   favorite: Joi.boolean().required(),
 });
-router.get("/", async (req, res, next) => {
+
+// get all contacts
+router.get("/", authorize, async (req, res, next) => {
   try {
-    const result = await Contact.find();
+    const { _id: owner } = req.user;
+    const result = await Contact.findOne(
+      { owner },
+      "-createdAt -updatedAt"
+    ).populate("owner", "name, email");
     res.json(result);
   } catch (error) {
     next(error);
   }
 });
 
+// get contact by id
 router.get("/:contactId", async (req, res, next) => {
   try {
     const { contactId } = req.params;
@@ -39,21 +48,24 @@ router.get("/:contactId", async (req, res, next) => {
   }
 });
 
-router.post("/", async (req, res, next) => {
+// post new contact
+router.post("/", authorize, async (req, res, next) => {
   try {
-    const { error } = contactScheme.validate(req.body);
+    const { _id: owner } = req.user;
+    const { error } = contactSchema.validate(req.body);
 
     if (error) {
       throw createError(400, error.message);
     }
 
-    const result = await Contact.create(req.body);
+    const result = await Contact.create({ ...req.body, owner });
     res.status(201).json(result);
   } catch (error) {
     next(error);
   }
 });
 
+// delete contact by id
 router.delete("/:contactId", async (req, res, next) => {
   try {
     const { contactId } = req.params;
@@ -67,6 +79,7 @@ router.delete("/:contactId", async (req, res, next) => {
   }
 });
 
+// update contacts favorite field
 router.patch("/:contactId/favorite", async (req, res, next) => {
   try {
     const { error } = contactUpdateFavoriteSchema.validate(req.body);
@@ -88,9 +101,10 @@ router.patch("/:contactId/favorite", async (req, res, next) => {
   }
 });
 
+// update contact
 router.put("/:contactId", async (req, res, next) => {
   try {
-    const { error } = contactScheme.validate(req.body);
+    const { error } = contactSchema.validate(req.body);
     if (error) {
       throw createError(400, error.message);
     }
