@@ -14,7 +14,6 @@ const router = express.Router();
 const emailRegexp = /[a-z0-9]+@[a-z]+\.[a-z]{2,3}/;
 
 const userRegisterSchema = Joi.object({
-  name: Joi.string().required(),
   email: Joi.string().pattern(emailRegexp).required(),
   password: Joi.string().min(6).required(),
 });
@@ -44,8 +43,8 @@ router.post("/signup", async (req, res, next) => {
     const hashPassword = await bcrypt.hash(password, 10);
     const result = await User.create({ email, password: hashPassword, name });
     res.status(201).json({
-      name: result.name,
       email: result.email,
+      subscription: result.subscription,
     });
   } catch (error) {
     next(error);
@@ -84,6 +83,10 @@ router.post("/login", async (req, res, next) => {
 
     res.json({
       token,
+      user: {
+        email: user.email,
+        subscription: user.subscription,
+      },
     });
   } catch (error) {
     next(error);
@@ -94,10 +97,30 @@ router.post("/login", async (req, res, next) => {
 router.get("/logout", authorize, async (req, res, next) => {
   try {
     const { _id } = req.user;
+    const user = await User.findById(_id);
+    if (!user) {
+      throw createError(401, "Not authorized");
+    }
     await User.findByIdAndUpdate(_id, { token: "" });
 
+    res.status(204);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// get current user
+router.get("/current", authorize, async (req, res, next) => {
+  try {
+    const { _id } = req.user;
+    const user = await User.findById(_id);
+    if (!user) {
+      throw createError(401, "Not authorized");
+    }
+
     res.json({
-      message: "Logout Successful",
+      email: user.email,
+      subscription: user.subscription,
     });
   } catch (error) {
     next(error);
