@@ -2,12 +2,16 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Joi = require("joi");
+const gravatar = require("gravatar");
+const path = require("path");
+const fs = require("fs/promises");
+const Jimp = require("jimp");
 require("dotenv").config();
 
 const User = require("../../models/user");
 
 const { createError } = require("../../helpers");
-const { authorize } = require("../../middlewares");
+const { authorize, upload } = require("../../middlewares");
 
 const router = express.Router();
 
@@ -41,7 +45,13 @@ router.post("/signup", async (req, res, next) => {
     }
 
     const hashPassword = await bcrypt.hash(password, 10);
-    const result = await User.create({ email, password: hashPassword, name });
+    const avatarURL = gravatar.url(email);
+    const result = await User.create({
+      email,
+      password: hashPassword,
+      name,
+      avatarURL,
+    });
     res.status(201).json({
       email: result.email,
       subscription: result.subscription,
@@ -126,5 +136,39 @@ router.get("/current", authorize, async (req, res, next) => {
     next(error);
   }
 });
+
+// update user avatar
+
+const avatarsDir = path.join(__dirname, "../../", "public", "avatars");
+
+router.patch(
+  "/avatars",
+  authorize,
+  upload.single("avatar"),
+  async (req, res, next) => {
+    try {
+      const { _id } = req.user;
+      const { path: tempDir, originalname } = req.file;
+
+      const [extention] = originalname.split(".").reverse();
+      const newAvatar = `${_id}.${extention}`;
+      const uploadDir = path.join(avatarsDir, newAvatar);
+
+      await fs.rename(tempDir, uploadDir);
+      const avatarURL = path.join("avatars", newAvatar);
+
+      Jimp.read(uploadDir, (err, lenna) => {
+        if (err) throw err;
+        lenna.resize(250, 250).write(uploadDir);
+      });
+
+      await User.findByIdAndUpdate(_id, { avatarURL });
+      res.json({ avatarURL });
+    } catch (error) {
+      await fs.unlink(req.file.path);
+      next(error);
+    }
+  }
+);
 
 module.exports = router;
