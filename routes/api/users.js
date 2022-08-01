@@ -97,7 +97,7 @@ router.get("/verify/:verificationToken", async (req, res, next) => {
   }
 });
 
-// mail check
+// mail double check
 router.post("/verify", async (req, res, next) => {
   try {
     const { error } = verifyEmailSchema.validate(req.body);
