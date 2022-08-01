@@ -6,11 +6,14 @@ const gravatar = require("gravatar");
 const path = require("path");
 const fs = require("fs/promises");
 const Jimp = require("jimp");
+const { nanoid } = require("nanoid");
+
 require("dotenv").config();
+const { SECRET_KEY } = process.env;
 
 const User = require("../../models/user");
 
-const { createError } = require("../../helpers");
+const { createError, sendMail } = require("../../helpers");
 const { authorize, upload } = require("../../middlewares");
 
 const router = express.Router();
@@ -27,7 +30,9 @@ const userLoginSchema = Joi.object({
   password: Joi.string().min(6).required(),
 });
 
-const { SECRET_KEY } = process.env;
+const verifyEmailSchema = Joi.object({
+  email: Joi.string().pattern(emailRegexp).required(),
+});
 
 // register
 router.post("/signup", async (req, res, next) => {
@@ -46,16 +51,75 @@ router.post("/signup", async (req, res, next) => {
 
     const hashPassword = await bcrypt.hash(password, 10);
     const avatarURL = gravatar.url(email);
+    const verificationToken = nanoid();
     const result = await User.create({
       email,
       password: hashPassword,
       name,
       avatarURL,
+      verificationToken,
     });
+
+    const mail = {
+      to: email,
+      subject: "Confirm your email address",
+      html: `<a target="_blank" href="http://localhost:3000/api/users/verify/${verificationToken}">Click here to confirm your mail</a>`,
+    };
+    await sendMail(mail);
+
     res.status(201).json({
       email: result.email,
       subscription: result.subscription,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// confirm user email
+router.get("/verify/:verificationToken", async (req, res, next) => {
+  try {
+    const { verificationToken } = req.params;
+    const user = await User.findOne({ verificationToken });
+    if (!user) {
+      throw createError(404);
+    }
+
+    await User.findByIdAndUpdate(user._id, {
+      verificationToken: null,
+      verify: true,
+    });
+    res.json({
+      message: "Verification successful",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// mail check
+router.post("/verify", async (req, res, next) => {
+  try {
+    const { error } = verifyEmailSchema.validate(req.body);
+    if (error) {
+      throw createError(400);
+    }
+
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) {
+      throw createError(404);
+    }
+    if (user.verify) {
+      throw createError(400, "Verification has already been passed");
+    }
+
+    const mail = {
+      to: email,
+      subject: "Confirm your email address",
+      html: `<a target="_blank" href="http://localhost:3000/api/users/${user.verificationToken}">Click here to confirm your mail</a>`,
+    };
+    await sendMail(mail);
   } catch (error) {
     next(error);
   }
@@ -70,6 +134,10 @@ router.post("/login", async (req, res, next) => {
     }
     const { email, password } = req.body;
     const user = await User.findOne({ email });
+
+    if (!user.verify) {
+      throw createError(401, "Email not verified");
+    }
 
     // if (!user) {
     //   throw createError(401, "Email wrong");
@@ -138,7 +206,6 @@ router.get("/current", authorize, async (req, res, next) => {
 });
 
 // update user avatar
-
 const avatarsDir = path.join(__dirname, "../../", "public", "avatars");
 
 router.patch(
